@@ -12,7 +12,6 @@ public class DailyPoetryRouter implements OriginRouter {
   public void router(OriginVertxContext originVertxContext, OriginConfig originConfig) {
     originVertxContext.getRouter().get("/daily-poetry/:date").handler(ctx -> {
       String date = ctx.pathParam("date");
-      System.out.println(date);
       //TODO: query from database
       DailyPoetryVO vo = DailyPoetryVO.builder()
         .date(date)
