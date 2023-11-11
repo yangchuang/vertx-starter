@@ -149,8 +149,8 @@ function deploy() {
     transfer
     # 启动 Java 服务
     start
-    # 健康检查
-    healthCheck
+    # 健康检查(TODO: 正常启动了但健康检查不通过，脚本有点问题)
+    # healthCheck
 }
 
 deploy

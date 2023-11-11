@@ -1,3 +1,7 @@
-create DATABASE sky_apps;
+#login postgres database with user postgres
 CREATE USER sky_app WITH ENCRYPTED PASSWORD '{password}';
-GRANT ALL PRIVILEGES ON DATABASE sky_apps TO sky_app;
+CREATE DATABASE sky_apps;
+
+#login sky_apps database with user postgres
+GRANT ALL ON SCHEMA public TO sky_app;
+
