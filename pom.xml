@@ -102,7 +102,8 @@
                 </transformer>
                 <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
               </transformers>
-              <outputFile>${project.build.directory}/${project.artifactId}-${project.version}-fat.jar
+<!--              <outputFile>${project.build.directory}/${project.artifactId}-${project.version}-fat.jar-->
+              <outputFile>${project.build.directory}/sky_apps_api.jar
               </outputFile>
             </configuration>
           </execution>
