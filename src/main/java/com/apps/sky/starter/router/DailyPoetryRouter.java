@@ -1,6 +1,5 @@
 package com.apps.sky.starter.router;
 
-import com.apps.sky.starter.vo.DailyPoetryVO;
 import com.origin.starter.web.OriginWebApplication;
 import com.origin.starter.web.domain.OriginConfig;
 import com.origin.starter.web.domain.OriginVertxContext;
@@ -13,17 +12,17 @@ import io.vertx.ext.healthchecks.HealthCheckHandler;
 import io.vertx.ext.healthchecks.Status;
 import io.vertx.ext.web.Router;
 import io.vertx.ext.web.RoutingContext;
+import io.vertx.redis.client.Command;
 import io.vertx.redis.client.Redis;
-import io.vertx.redis.client.RedisAPI;
+import io.vertx.redis.client.Request;
+import io.vertx.sqlclient.Row;
+import io.vertx.sqlclient.RowSet;
 import io.vertx.sqlclient.SqlClient;
+import io.vertx.sqlclient.Tuple;
 import lombok.extern.slf4j.Slf4j;
-
-import java.util.Arrays;
 
 @Slf4j
 public class DailyPoetryRouter implements OriginRouter {
-
-  private SqlClient sqlClient = OriginWebApplication.getBeanFactory().getSqlClient();
 
   @Override
   public void router(OriginVertxContext originVertxContext, OriginConfig originConfig) {
@@ -40,34 +39,64 @@ public class DailyPoetryRouter implements OriginRouter {
       String date = ctx.pathParam("date");
       //TODO: 默认连接 127.0.0.1:6379, config.json 的配置不生效（bug或尚未实现）
       Redis redis = OriginWebApplication.getBeanFactory().getRedisClient();
-      redis.connect();
-      RedisAPI redisAPI = RedisAPI.api(redis);
-      redisAPI.get(date).onSuccess(value -> {
-        if (value != null) {
-          log.info("cache hit");
-          ctx.json(Json.decodeValue(value.toString()));
-        } else {
-          log.warn("XXX cache not hit");
-          //TODO: query from database
-          DailyPoetryVO vo = DailyPoetryVO.builder()
-            .date(date)
-            .aphorism("“人生最美妙的风景，竟是内心的淡定与从容。我们曾如此期盼外界的认可，到最后才知道，世界是自己的，与他人毫无关系。” ")
-            .aphorismAuthor("杨绛")
-            .poetry("醉后不知天在水，满船清梦压星河")
-            .imgList(Arrays.asList("https://skytools.cn/images/poetry/1.jpeg", "https://skytools.cn/images/poetry/2.jpeg"))
-            .build();
-          //set cache, expire time 24h
-          redisAPI.set(Arrays.asList(date, Json.encode(vo), "EX", "86400"));
-
-          //response json
-          ctx.json(vo);
-        }
-      }).onComplete(handle -> {
-        redisAPI.close();
-        //redis.close(); //redisAPI.close() 会把redis 关闭
+      redis.connect().onSuccess(conn -> {
+        conn.send(Request.cmd(Command.GET).arg("date")).onSuccess(value -> {
+          if (value != null) {
+            log.info("{} daily poetry cache hit", date);
+            ctx.json(Json.decodeValue(value.toString()));
+          } else {
+            log.warn("{} daily poetry cache NOT HIT", date);
+            getDailyPoetryFromDB(ctx, date);
+          }
+        });
+        conn.close();//TODO?
+      }).onFailure(ex -> {
+        log.error("Failed to connect to Redis: {}", ex.getMessage());
+        //连接redis失败，直接查询数据库
+        getDailyPoetryFromDB(ctx, date);
       });
+
     };
   }
+
+  private void getDailyPoetryFromDB(RoutingContext ctx, String date) {
+    SqlClient sqlClient = OriginWebApplication.getBeanFactory().getSqlClient();
+    String sql = "select date, aphorism, aphorism_author, poetry, img_list from app_aphorism_poetry_common where date = $1 limit 1";
+    sqlClient.preparedQuery(sql).execute(Tuple.of(date))
+      .onComplete(ar -> {
+        if (ar.succeeded()) {
+          RowSet<Row> rows = ar.result();
+          if (rows.size() != 0) {
+            Row row = rows.iterator().next();
+            JsonObject jsonObject = row.toJson();
+
+            //放到缓存中，24小时后失效
+            //WARN：本方法外层也有redis client，但通过方法参数传进来使用不起作用，猜测是异步的原因
+            System.out.println("======== redis 设置缓存不生效！！！ ======");
+            Redis redis = OriginWebApplication.getBeanFactory().getRedisClient();
+            redis.connect().onSuccess(conn -> {
+              conn.send(Request.cmd(Command.SET, date, Json.encode(jsonObject), "EX", "86400"));
+              //TODO: 需不需要关闭?
+              conn.close();
+            });
+
+            //response json
+            ctx.json(jsonObject);
+          } else {
+            log.warn("data not found on date:" + date);
+            ctx.fail(404, new Throwable("data not found on date:" + date));
+          }
+        } else {
+          log.error(("get daily poetry failed: " + ar.cause().getMessage()));
+          ctx.fail(500, ar.cause());
+        }
+        //onComplete无论成功还是失败，都关闭sqlCLient
+        //TODO: 但这个看起来不像是释放数据库连接？
+        sqlClient.close();
+      }).onFailure(err -> ctx.fail(500, err));
+  }
+
+
 
   private HealthCheckHandler healthCheckHandler(OriginVertxContext originVertxContext) {
     Vertx vertx = originVertxContext.getVertx();
