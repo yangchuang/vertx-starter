@@ -26,7 +26,6 @@ public class DailyPoetryRouter implements OriginRouter {
 
   @Override
   public void router(OriginVertxContext originVertxContext, OriginConfig originConfig) {
-
     Router router = originVertxContext.getRouter();
 
     router.get("/api/health").handler(healthCheckHandler(originVertxContext));
@@ -37,10 +36,10 @@ public class DailyPoetryRouter implements OriginRouter {
   private Handler<RoutingContext> dailyPoetryHandler() {
     return ctx -> {
       String date = ctx.pathParam("date");
-      //TODO: 默认连接 127.0.0.1:6379, config.json 的配置不生效（bug或尚未实现）
+
       Redis redis = OriginWebApplication.getBeanFactory().getRedisClient();
       redis.connect().onSuccess(conn -> {
-        conn.send(Request.cmd(Command.GET).arg("date")).onSuccess(value -> {
+        conn.send(Request.cmd(Command.GET).arg(date)).onSuccess(value -> {
           if (value != null) {
             log.info("{} daily poetry cache hit", date);
             ctx.json(Json.decodeValue(value.toString()));
@@ -49,7 +48,6 @@ public class DailyPoetryRouter implements OriginRouter {
             getDailyPoetryFromDB(ctx, date);
           }
         });
-        conn.close();//TODO?
       }).onFailure(ex -> {
         log.error("Failed to connect to Redis: {}", ex.getMessage());
         //连接redis失败，直接查询数据库
@@ -71,13 +69,10 @@ public class DailyPoetryRouter implements OriginRouter {
             JsonObject jsonObject = row.toJson();
 
             //放到缓存中，24小时后失效
-            //WARN：本方法外层也有redis client，但通过方法参数传进来使用不起作用，猜测是异步的原因
-            System.out.println("======== redis 设置缓存不生效！！！ ======");
             Redis redis = OriginWebApplication.getBeanFactory().getRedisClient();
             redis.connect().onSuccess(conn -> {
               conn.send(Request.cmd(Command.SET, date, Json.encode(jsonObject), "EX", "86400"));
-              //TODO: 需不需要关闭?
-              conn.close();
+              //TODO: conn 需不需要关闭？
             });
 
             //response json

@@ -1,1 +1,2 @@
 com.apps.sky.starter.router.DailyPoetryRouter
+com.apps.sky.starter.task.PoetryFetchTask
