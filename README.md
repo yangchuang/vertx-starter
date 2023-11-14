@@ -33,8 +33,16 @@ docker ps -a
 docker start [container id]
 ```
 
-#### 4. 创建数据库
+#### 4. 创建数据库并导入数据表
 ```shell
-# 见/sql/init/create_database_and_user.sql
+# 见/sql/init/create_database_and_user.sql及/sql/migration/*
+```
+
+#### 5.设置系统环境变量
+```shell
+sudo -s
+echo 'export OPENAI_API_KEY="sk-****"' >> ~/.bashrc
+echo 'export JRSC_TOKEN="****Rsk"' >> ~/.bashrc
+source ~/.bashrc
 ```
 

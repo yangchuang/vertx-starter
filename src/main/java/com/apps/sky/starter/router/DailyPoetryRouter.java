@@ -59,7 +59,7 @@ public class DailyPoetryRouter implements OriginRouter {
 
   private void getDailyPoetryFromDB(RoutingContext ctx, String date) {
     SqlClient sqlClient = OriginWebApplication.getBeanFactory().getSqlClient();
-    String sql = "select date, aphorism, aphorism_author, poetry, img_list from app_aphorism_poetry_common where date = $1 limit 1";
+    String sql = "select date, content, title, dynasty, author, origin_content, img_list from app_daily_poetry where date = $1 limit 1";
     sqlClient.preparedQuery(sql).execute(Tuple.of(date))
       .onComplete(ar -> {
         if (ar.succeeded()) {

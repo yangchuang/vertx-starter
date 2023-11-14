@@ -1,42 +1,215 @@
 package com.apps.sky.starter.task;
 
+import cn.hutool.core.date.DateUtil;
 import cn.hutool.core.date.LocalDateTimeUtil;
+import cn.hutool.core.date.TimeInterval;
+import com.apps.sky.starter.codec.AppDailyPoetryCodec;
+import com.apps.sky.starter.domain.AppDailyPoetry;
+import com.apps.sky.starter.utils.AppUtil;
+import com.origin.starter.web.OriginWebApplication;
 import com.origin.starter.web.domain.OriginConfig;
 import com.origin.starter.web.domain.OriginVertxContext;
 import com.origin.starter.web.spi.OriginRouter;
 import io.vertx.core.Vertx;
+import io.vertx.core.eventbus.EventBus;
+import io.vertx.core.json.JsonObject;
+import io.vertx.ext.web.client.WebClient;
+import io.vertx.redis.client.Redis;
+import io.vertx.sqlclient.SqlClient;
+import io.vertx.sqlclient.Tuple;
 import lombok.extern.slf4j.Slf4j;
 
+import java.io.IOException;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
+import java.util.Arrays;
 
 @Slf4j
 public class PoetryFetchTask implements OriginRouter {
+
+  private WebClient httpClient;
+
+  private Redis redis;
+
+  private SqlClient sqlClient;
+
+  private EventBus eventBus;
+
+  private static final String CENTENCE_URI = "https://v2.jinrishici.com/sentence";
+
+  private static final String DALL_E_URI = "https://gateway.ai.cloudflare.com/v1/ec0e967f7d79b76e5fc5aad5c0b9c0f9/skyapp/openai/images/generations";
+
+  /**
+   * 获取当天诗词配图失败的fallback地址
+   */
+  private static final String DEFAULT_IMG_URL = "https://skytools.cn/images/poetry/3.jpeg";
+
+  //
+  private static final String IMG_STORE_PATH = "/var/www/html/images/poetry/{date}/";
+  //本地调试保存地址
+  //private static final String IMG_STORE_PATH = "/Users/yang/data/{date}/";
+  private static final String IMG_ACCESS_PATH = "https://skytools.cn/images/poetry/{date}/";
+
   @Override
   public void router(OriginVertxContext originVertxContext, OriginConfig originConfig) {
+    //初始化http,redis,sql client
+    initClient(originVertxContext, originConfig);
+    //注册处理器
+    registerEventBusConsumers();
 
+    //启动定时任务
+    fetchDailyPoetryTask(originVertxContext);
+  }
+
+  /**
+   * 定时任务，每天00:00:10获取当天的诗词。
+   * 流程：
+   * 1. 从今日诗词获取诗句
+   * 2. 使用DALL-E给核心诗句配图，并保存到Nginx服务器相关目录下提供访问。
+   * 3. 保存相关数据到数据库持久化
+   *
+   * @param originVertxContext
+   */
+  private void fetchDailyPoetryTask(OriginVertxContext originVertxContext) {
     Vertx vertx = originVertxContext.getVertx();
     //设置00:00:10 开始取当天数据
     vertx.setTimer(millisecondsToMidnight() + 10000, timerId -> {
+    //vertx.setTimer(3000, timerId -> {//本地调试使用
       log.info("begin to run daily job at {}", LocalDateTimeUtil.now());
-      fetchDailyPoetry(vertx);
+      fetchDailyPoetry();
       //每天取一次数据
-      vertx.setPeriodic(24*60*60*1000, periodicId -> {
+      vertx.setPeriodic(24 * 60 * 60 * 1000, periodicId -> {
         log.info("begin to fetch daily poetry at {}", LocalDateTimeUtil.now());
-        fetchDailyPoetry(vertx);
+        fetchDailyPoetry();
       });
     });
   }
 
-  private void fetchDailyPoetry(Vertx vertx) {
+
+  private void fetchDailyPoetry() {
     //从环境变量中取今日诗词API的token，https://www.jinrishici.com/doc/#get-token
     String jrscToken = System.getenv("JRSC_TOKEN");
+
+    httpClient.getAbs(CENTENCE_URI)
+      .putHeader("X-User-Token", jrscToken)
+      .send()
+      .onSuccess(resp -> {
+        JsonObject json = resp.bodyAsJsonObject();
+        log.error("从今日诗词API获取诗词成功，{},{}", DateUtil.date(), json);
+        //发送到event bus，通知对应的consumer处理数据
+        eventBus.send("fetch-daily-poetry-done", json);
+      }).onFailure(err ->
+        log.error("从今日诗词API获取诗词失败，{},{}", DateUtil.date(), err.getMessage())
+      );
   }
 
-  private void generateImage(String poetry) {
+  private void saveDailyPoetry(AppDailyPoetry poetry) {
+    String sql = "INSERT INTO app_daily_poetry (date, content, popularity, title, dynasty, author, origin_content, match_tags, img_list, ip_address) " +
+      "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)";
+    sqlClient.preparedQuery(sql).execute(Tuple.of(
+      poetry.getDate(),
+      poetry.getContent(),
+      poetry.getPopularity(),
+      poetry.getTitle(),
+      poetry.getDynasty(),
+      poetry.getAuthor(),
+      poetry.getOriginContent().toArray(),
+      poetry.getMatchTags().toArray(),
+      poetry.getImgList().toArray(),
+      poetry.getIpAddress()
+    )).onSuccess(result -> {
+      log.info("保存诗词信息到数据库成功，{}", DateUtil.today());
+    }).onFailure(throwable -> {
+      log.error("保存诗词信息到数据库失败，{}，{}", DateUtil.today(), throwable.getMessage());
+    });
+  }
+
+  private void generateImages(JsonObject json) {
+    TimeInterval timer = DateUtil.timer();
+
+    AppDailyPoetry poetry = jsonToPoetry(json);
+
     //从环境变量中取OpenAI的API KEY
     String openAIAPIkey = System.getenv("OPENAI_API_KEY");
+    //核心诗句
+    String content = json.getJsonObject("data").getString("content");
+    String today = DateUtil.today();
+    //JsonObject body = new JsonObject().put("model", "dall-e-2").put("prompt", "中国水墨画: " + content).put("n", 1).put("size", "512x512");
+    JsonObject body = new JsonObject().put("model", "dall-e-3").put("prompt", "中国水墨画: " + content).put("n", 1).put("size", "1024x1024");
+    //TODO: 这个请求会比较慢
+    httpClient.postAbs(DALL_E_URI).putHeader("Content-Type", "application/json")
+      .bearerTokenAuthentication(openAIAPIkey)
+      .sendJsonObject(body).onSuccess(resp -> {
+        long costTime = timer.interval();
+        log.info("使用OpenAI DELL-E生成配图耗时：{}", costTime);
+
+        JsonObject openAIJsonResp = resp.bodyAsJsonObject();
+        //DALL-E3目前只返回一张图片
+        String url = openAIJsonResp.getJsonArray("data")
+          .getJsonObject(0)
+          .getString("url");
+        String destinationPath = IMG_STORE_PATH.replace("{date}", today)+ "1.png";
+        //TODO: 文件IO操作也比较慢
+        try {
+          AppUtil.saveImage(url, destinationPath);
+          poetry.setImgList(Arrays.asList(IMG_ACCESS_PATH.replace("{date}", today)+ "1.png"));
+        } catch (IOException e) {
+          log.warn("保存诗词DALL-E3配图失败，使用默认配图。{}，error：{}", today, e.getMessage());
+          poetry.setImgList(Arrays.asList(DEFAULT_IMG_URL));
+        }
+      }).onFailure(err -> {
+        log.warn("获取诗词DALL-E3配图失败，使用默认配图。{}，error：{}", today, err.getMessage());
+        poetry.setImgList(Arrays.asList(DEFAULT_IMG_URL));
+      }).onComplete(ar -> {
+        log.info("{}的诗词是:{}", today, poetry);
+        //发送到event bus，通知对应的consumer保存数据到数据库
+        eventBus.send("generate-poetry-image-done", poetry);
+
+        long costTime = timer.interval();
+        log.info("使用OpenAI DELL-E生成配图并保存到文件系统总耗时：{}", costTime);
+      });
   }
+
+  private AppDailyPoetry jsonToPoetry(JsonObject json) {
+    JsonObject data = json.getJsonObject("data");
+    JsonObject origin = data.getJsonObject("origin");
+
+    AppDailyPoetry poetry = new AppDailyPoetry();
+    poetry.setDate(DateUtil.today());//今天
+    poetry.setContent(data.getString("content"));
+    poetry.setPopularity(data.getInteger("popularity"));
+    poetry.setTitle(origin.getString("title"));
+    poetry.setDynasty(origin.getString("dynasty"));
+    poetry.setAuthor(origin.getString("author"));
+    poetry.setOriginContent(origin.getJsonArray("content").getList());
+    poetry.setMatchTags(data.getJsonArray("matchTags").getList());
+    poetry.setIpAddress(json.getString("ipAddress"));
+    return poetry;
+  }
+
+  private void registerEventBusConsumers() {
+    log.info("开始注册Event Bus Consumers...");
+    //从今日诗词API获取到诗句后，将使用DALL-E给核心诗句配图，保存到Nginx 相关目录下。
+    eventBus.consumer("fetch-daily-poetry-done", poetry -> {
+      generateImages((JsonObject) poetry.body());
+    });
+    //使用DALL-E给核心诗句生成配图后，将诗词信息及配图url一起保存到数据库
+    eventBus.consumer("generate-poetry-image-done", message -> {
+      saveDailyPoetry((AppDailyPoetry) message.body());
+    });
+  }
+
+  private void initClient(OriginVertxContext originVertxContext, OriginConfig originConfig) {
+    log.info("初始化HttpClient");
+    Vertx vertx = originVertxContext.getVertx();
+    this.httpClient = WebClient.create(vertx);
+    this.redis = OriginWebApplication.getBeanFactory().getRedisClient();
+    this.sqlClient = OriginWebApplication.getBeanFactory().getSqlClient();
+    this.eventBus = originConfig.getEventBus();
+    //注册编解码器
+    eventBus.registerDefaultCodec(AppDailyPoetry.class, new AppDailyPoetryCodec());
+  }
+
   private long millisecondsToMidnight() {
     LocalDateTime now = LocalDateTimeUtil.now();
     LocalDateTime end = LocalDateTimeUtil.endOfDay(now);
