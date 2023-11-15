@@ -29,10 +29,6 @@ public class DailyPoetryRouter implements OriginRouter {
 
   private WebClient httpClient;
 
-  private Redis redis;
-
-  private SqlClient sqlClient;
-
   private static final String CODE_2_SESSION_URI = " https://api.weixin.qq.com/sns/jscode2session?appid={wx_app_id}&secret={wx_app_secret}&js_code={code}&grant_type=authorization_code";
 
   @Override
@@ -59,6 +55,7 @@ public class DailyPoetryRouter implements OriginRouter {
   private void code2Session(String code) {
     String appId = System.getenv("wx_app_id");
     String appSecret = System.getenv("wx_app_secret");
+
     httpClient.getAbs(CODE_2_SESSION_URI.replace("{wx_app_id}", appId).replace("{wx_app_secret}", appSecret).replace("{code}", code))
       .send()
       .onSuccess(res -> {
@@ -76,6 +73,7 @@ public class DailyPoetryRouter implements OriginRouter {
     String sessionKey = jsonObject.getString("session_key");
     String sql = "insert into app_daily_poetry_user(open_id, union_id, session_key) values($1, $2, $3)  " +
       "ON CONFLICT (open_id) DO update set session_key = $4, last_login_time = now(), update_time = now()";
+    SqlClient sqlClient = OriginWebApplication.getBeanFactory().getSqlClient();
     sqlClient.preparedQuery(sql).execute(Tuple.of(openId, unionid, sessionKey, sessionKey))
       .onSuccess(rs -> {
         log.info("保存或更新user成功，{}", jsonObject);
@@ -88,7 +86,7 @@ public class DailyPoetryRouter implements OriginRouter {
   private Handler<RoutingContext> dailyPoetryHandler() {
     return ctx -> {
       String date = ctx.pathParam("date");
-
+      Redis redis = OriginWebApplication.getBeanFactory().getRedisClient();
       redis.connect().onSuccess(conn -> {
         conn.send(Request.cmd(Command.GET).arg(date)).onSuccess(value -> {
           if (value != null) {
@@ -110,6 +108,7 @@ public class DailyPoetryRouter implements OriginRouter {
 
   private void getDailyPoetryFromDB(RoutingContext ctx, String date) {
     String sql = "select date, content, title, dynasty, author, origin_content, img_list from app_daily_poetry where date = $1 limit 1";
+    SqlClient sqlClient = OriginWebApplication.getBeanFactory().getSqlClient();
     sqlClient.preparedQuery(sql).execute(Tuple.of(date))
       .onComplete(ar -> {
         if (ar.succeeded()) {
@@ -117,7 +116,7 @@ public class DailyPoetryRouter implements OriginRouter {
           if (rows.size() != 0) {
             Row row = rows.iterator().next();
             JsonObject jsonObject = row.toJson();
-
+            Redis redis = OriginWebApplication.getBeanFactory().getRedisClient();
             //放到缓存中，24小时后失效
             redis.connect().onSuccess(conn -> {
               conn.send(Request.cmd(Command.SET, date, Json.encode(jsonObject), "EX", "86400"));
@@ -134,9 +133,6 @@ public class DailyPoetryRouter implements OriginRouter {
           log.error(("get daily poetry failed: " + ar.cause().getMessage()));
           ctx.fail(500, ar.cause());
         }
-        //onComplete无论成功还是失败，都关闭sqlCLient
-        //TODO: 但这个看起来不像是释放数据库连接？
-        sqlClient.close();
       }).onFailure(err -> ctx.fail(500, err));
   }
 
@@ -149,6 +145,7 @@ public class DailyPoetryRouter implements OriginRouter {
     // Register procedures
     // It can be done after the route registration, or even at runtime
     healthCheckHandler.register("redis", promise -> {
+      Redis redis = OriginWebApplication.getBeanFactory().getRedisClient();
       redis.connect().onSuccess(redisConnection -> {
         promise.complete(Status.OK());
         redisConnection.close();
@@ -164,8 +161,6 @@ public class DailyPoetryRouter implements OriginRouter {
     log.info("初始化Clients");
     Vertx vertx = originVertxContext.getVertx();
     this.httpClient = WebClient.create(vertx);
-    this.redis = OriginWebApplication.getBeanFactory().getRedisClient();
-    this.sqlClient = OriginWebApplication.getBeanFactory().getSqlClient();
   }
 
 }

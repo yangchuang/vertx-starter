@@ -14,7 +14,6 @@ import io.vertx.core.Vertx;
 import io.vertx.core.eventbus.EventBus;
 import io.vertx.core.json.JsonObject;
 import io.vertx.ext.web.client.WebClient;
-import io.vertx.redis.client.Redis;
 import io.vertx.sqlclient.SqlClient;
 import io.vertx.sqlclient.Tuple;
 import lombok.extern.slf4j.Slf4j;
@@ -28,10 +27,6 @@ import java.util.Arrays;
 public class PoetryFetchTask implements OriginRouter {
 
   private WebClient httpClient;
-
-  private Redis redis;
-
-  private SqlClient sqlClient;
 
   private EventBus eventBus;
 
@@ -106,6 +101,7 @@ public class PoetryFetchTask implements OriginRouter {
   private void saveDailyPoetry(AppDailyPoetry poetry) {
     String sql = "INSERT INTO app_daily_poetry (date, content, popularity, title, dynasty, author, origin_content, match_tags, img_list, ip_address) " +
       "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)";
+    SqlClient sqlClient = OriginWebApplication.getBeanFactory().getSqlClient();
     sqlClient.preparedQuery(sql).execute(Tuple.of(
       poetry.getDate(),
       poetry.getContent(),
@@ -204,8 +200,6 @@ public class PoetryFetchTask implements OriginRouter {
     log.info("初始化HttpClient");
     Vertx vertx = originVertxContext.getVertx();
     this.httpClient = WebClient.create(vertx);
-    this.redis = OriginWebApplication.getBeanFactory().getRedisClient();
-    this.sqlClient = OriginWebApplication.getBeanFactory().getSqlClient();
     this.eventBus = originConfig.getEventBus();
     //注册编解码器
     eventBus.registerDefaultCodec(AppDailyPoetry.class, new AppDailyPoetryCodec());
