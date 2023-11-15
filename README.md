@@ -43,6 +43,8 @@ docker start [container id]
 sudo -s
 echo 'export OPENAI_API_KEY="sk-****"' >> ~/.bashrc
 echo 'export JRSC_TOKEN="****Rsk"' >> ~/.bashrc
+echo 'export wx_app_id="wx***"'  >> ~/.bashrc
+echo 'export wx_app_secret="d268d****"'  >> ~/.bashrc
 source ~/.bashrc
 ```
 

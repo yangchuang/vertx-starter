@@ -30,10 +30,11 @@ COMMENT ON COLUMN app_daily_poetry.update_time IS '更新时间';
 
 CREATE TABLE app_daily_poetry_user (
     id SERIAL PRIMARY KEY,
-    open_id TEXT,
+    open_id TEXT UNIQUE,
     union_id TEXT,
     nick_name TEXT,
     avatar_url TEXT,
+    session_key TEXT,
     create_time TIMESTAMPTZ DEFAULT NOW(),
     update_time TIMESTAMPTZ DEFAULT NOW(),
     last_login_time TIMESTAMPTZ DEFAULT NOW(),
@@ -45,6 +46,7 @@ COMMENT ON COLUMN app_daily_poetry_user.open_id IS '用户的OpenID';
 COMMENT ON COLUMN app_daily_poetry_user.union_id IS '用户的UnionID';
 COMMENT ON COLUMN app_daily_poetry_user.nick_name IS '用户的昵称';
 COMMENT ON COLUMN app_daily_poetry_user.avatar_url IS '用户的头像URL';
+COMMENT ON COLUMN app_daily_poetry_user.session_key IS '用户的session_key';
 COMMENT ON COLUMN app_daily_poetry_user.create_time IS '创建时间';
 COMMENT ON COLUMN app_daily_poetry_user.update_time IS '更新时间';
 COMMENT ON COLUMN app_daily_poetry_user.last_login_time IS '最后登录时间';

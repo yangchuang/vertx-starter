@@ -1,5 +1,6 @@
 package com.apps.sky.starter.router;
 
+import cn.hutool.core.lang.UUID;
 import com.origin.starter.web.OriginWebApplication;
 import com.origin.starter.web.domain.OriginConfig;
 import com.origin.starter.web.domain.OriginVertxContext;
@@ -12,6 +13,7 @@ import io.vertx.ext.healthchecks.HealthCheckHandler;
 import io.vertx.ext.healthchecks.Status;
 import io.vertx.ext.web.Router;
 import io.vertx.ext.web.RoutingContext;
+import io.vertx.ext.web.client.WebClient;
 import io.vertx.redis.client.Command;
 import io.vertx.redis.client.Redis;
 import io.vertx.redis.client.Request;
@@ -24,12 +26,62 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class DailyPoetryRouter implements OriginRouter {
 
+
+  private WebClient httpClient;
+
+  private Redis redis;
+
+  private SqlClient sqlClient;
+
+  private static final String CODE_2_SESSION_URI = " https://api.weixin.qq.com/sns/jscode2session?appid={wx_app_id}&secret={wx_app_secret}&js_code={code}&grant_type=authorization_code";
+
   @Override
   public void router(OriginVertxContext originVertxContext, OriginConfig originConfig) {
+    //初始化http,redis,sql client
+    initClient(originVertxContext, originConfig);
+
     Router router = originVertxContext.getRouter();
 
     router.get("/api/health").handler(healthCheckHandler(originVertxContext));
+    router.get("/api/login").handler(loginHandler());
     router.get("/daily-poetry/:date").handler(dailyPoetryHandler());
+
+  }
+
+  private Handler<RoutingContext> loginHandler() {
+    return ctx -> {
+      String code = ctx.request().params().get("code");
+      code2Session(code);
+      ctx.json(new JsonObject().put("token", UUID.fastUUID().toString()));
+    };
+  }
+
+  private void code2Session(String code) {
+    String appId = System.getenv("wx_app_id");
+    String appSecret = System.getenv("wx_app_secret");
+    httpClient.getAbs(CODE_2_SESSION_URI.replace("{wx_app_id}", appId).replace("{wx_app_secret}", appSecret).replace("{code}", code))
+      .send()
+      .onSuccess(res -> {
+        JsonObject json = res.bodyAsJsonObject();
+        saveOrUpdateUser(json);
+      }).onFailure(err -> {
+        log.error("从微信code2Session接口失败，code：{},{}", code, err.getMessage());
+      });
+  }
+
+  private void saveOrUpdateUser(JsonObject jsonObject) {
+    log.info("开始保存或更新user，{}", jsonObject);
+    String openId = jsonObject.getString("openid");
+    String unionid = jsonObject.getString("unionid");
+    String sessionKey = jsonObject.getString("session_key");
+    String sql = "insert into app_daily_poetry_user(open_id, union_id, session_key) values($1, $2, $3)  " +
+      "ON CONFLICT (open_id) DO update set session_key = $4, last_login_time = now(), update_time = now()";
+    sqlClient.preparedQuery(sql).execute(Tuple.of(openId, unionid, sessionKey, sessionKey))
+      .onSuccess(rs -> {
+        log.info("保存或更新user成功，{}", jsonObject);
+      }).onFailure(err -> {
+        log.error("保存或更新user失败，{},{}", jsonObject, err.getMessage());
+      });
 
   }
 
@@ -37,7 +89,6 @@ public class DailyPoetryRouter implements OriginRouter {
     return ctx -> {
       String date = ctx.pathParam("date");
 
-      Redis redis = OriginWebApplication.getBeanFactory().getRedisClient();
       redis.connect().onSuccess(conn -> {
         conn.send(Request.cmd(Command.GET).arg(date)).onSuccess(value -> {
           if (value != null) {
@@ -58,7 +109,6 @@ public class DailyPoetryRouter implements OriginRouter {
   }
 
   private void getDailyPoetryFromDB(RoutingContext ctx, String date) {
-    SqlClient sqlClient = OriginWebApplication.getBeanFactory().getSqlClient();
     String sql = "select date, content, title, dynasty, author, origin_content, img_list from app_daily_poetry where date = $1 limit 1";
     sqlClient.preparedQuery(sql).execute(Tuple.of(date))
       .onComplete(ar -> {
@@ -69,7 +119,6 @@ public class DailyPoetryRouter implements OriginRouter {
             JsonObject jsonObject = row.toJson();
 
             //放到缓存中，24小时后失效
-            Redis redis = OriginWebApplication.getBeanFactory().getRedisClient();
             redis.connect().onSuccess(conn -> {
               conn.send(Request.cmd(Command.SET, date, Json.encode(jsonObject), "EX", "86400"));
               //TODO: conn 需不需要关闭？
@@ -100,7 +149,6 @@ public class DailyPoetryRouter implements OriginRouter {
     // Register procedures
     // It can be done after the route registration, or even at runtime
     healthCheckHandler.register("redis", promise -> {
-      Redis redis = OriginWebApplication.getBeanFactory().getRedisClient();
       redis.connect().onSuccess(redisConnection -> {
         promise.complete(Status.OK());
         redisConnection.close();
@@ -110,6 +158,14 @@ public class DailyPoetryRouter implements OriginRouter {
     });
 
     return healthCheckHandler;
+  }
+
+  private void initClient(OriginVertxContext originVertxContext, OriginConfig originConfig) {
+    log.info("初始化Clients");
+    Vertx vertx = originVertxContext.getVertx();
+    this.httpClient = WebClient.create(vertx);
+    this.redis = OriginWebApplication.getBeanFactory().getRedisClient();
+    this.sqlClient = OriginWebApplication.getBeanFactory().getSqlClient();
   }
 
 }
