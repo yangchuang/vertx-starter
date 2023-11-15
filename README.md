@@ -46,3 +46,5 @@ echo 'export JRSC_TOKEN="****Rsk"' >> ~/.bashrc
 source ~/.bashrc
 ```
 
+#### 6. 定时对DALL-E生成的配图进行压缩，见 [图片压缩](./IMAGE_COMPRESS.md)
+

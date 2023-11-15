@@ -152,7 +152,7 @@ public class PoetryFetchTask implements OriginRouter {
         //TODO: 文件IO操作也比较慢
         try {
           AppUtil.saveImage(url, destinationPath);
-          poetry.setImgList(Arrays.asList(IMG_ACCESS_PATH.replace("{date}", today)+ "1.png"));
+          poetry.setImgList(Arrays.asList(IMG_ACCESS_PATH.replace("{date}", today)+ "1.jpg"));
         } catch (IOException e) {
           log.warn("保存诗词DALL-E3配图失败，使用默认配图。{}，error：{}", today, e.getMessage());
           poetry.setImgList(Arrays.asList(DEFAULT_IMG_URL));
