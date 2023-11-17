@@ -32,7 +32,7 @@ public class PoetryFetchTask implements OriginRouter {
 
   private static final String CENTENCE_URI = "https://v2.jinrishici.com/sentence";
 
-  private static final String DALL_E_URI = "https://gateway.ai.cloudflare.com/v1/ec0e967f7d79b76e5fc5aad5c0b9c0f9/skyapp/openai/images/generations";
+  private static final String DALL_E_URI = "https://ai.ericsky.com/api/openai/v1/images/generations";
 
   /**
    * 获取当天诗词配图失败的fallback地址
@@ -92,14 +92,12 @@ public class PoetryFetchTask implements OriginRouter {
         JsonObject json = resp.bodyAsJsonObject();
         log.error("从今日诗词API获取诗词成功，{},{}", DateUtil.date(), json);
         AppDailyPoetry poetry = jsonToPoetry(json);
-        //TODO: 通过cloudflare ai gateway访问不了openai API了，先用默认图片
-        //poetry.setImgList(Arrays.asList(IMG_ACCESS_PATH.replace("{date}", DateUtil.today())+ "1.jpg"));
-        poetry.setImgList(Arrays.asList(DEFAULT_IMG_URL));
 
-        //发送到event bus，通知对应的consumer处理数据
+        //1. 发送到event bus，通知对应的consumer保存数据到数据库
         eventBus.send("fetch-daily-poetry-done", poetry);
-        //并行执行使用DELL-E生成配图。
-        //eventBus.send("generate-poetry-image", poetry.getContent());
+
+        //2. 并行执行使用DELL-E生成配图。
+        eventBus.send("generate-poetry-image", poetry.getContent());
       }).onFailure(err ->
         log.error("从今日诗词API获取诗词失败，{},{}", DateUtil.date(), err.getMessage())
       );
@@ -125,6 +123,18 @@ public class PoetryFetchTask implements OriginRouter {
     }).onFailure(throwable -> {
       log.error("保存诗词信息到数据库失败，{}，{}", DateUtil.today(), throwable.getMessage());
     });
+  }
+
+  private void updateImageUrl() {
+    String today = DateUtil.today();
+    String imgUrl = IMG_ACCESS_PATH.replace("{date}", today)+ "1.jpg";
+
+    String sql = "update app_daily_poetry set img_list = $1 where date = $2 ";
+    SqlClient sqlClient = OriginWebApplication.getBeanFactory().getSqlClient();
+    sqlClient.preparedQuery(sql).execute(Tuple.of(new String[] {imgUrl}, today))
+      .onFailure(err -> {
+        log.error("更新当天配图失败，{}，{}", today, err.getMessage());
+      });
   }
 
   /**
@@ -156,7 +166,7 @@ public class PoetryFetchTask implements OriginRouter {
         //TODO: 文件IO操作也比较慢
         try {
           AppUtil.saveImage(url, destinationPath);
-          //TODO：更新当天的img url
+          updateImageUrl();
         } catch (IOException e) {
           log.warn("保存诗词DALL-E3配图失败，使用默认配图。{}，error：{}", today, e.getMessage());
         }
@@ -182,6 +192,8 @@ public class PoetryFetchTask implements OriginRouter {
     poetry.setOriginContent(origin.getJsonArray("content").getList());
     poetry.setMatchTags(data.getJsonArray("matchTags").getList());
     poetry.setIpAddress(json.getString("ipAddress"));
+    //先用默认图片, DALL-E3生成配图后再更新图片地址
+    poetry.setImgList(Arrays.asList(DEFAULT_IMG_URL));
     return poetry;
   }
 
@@ -192,10 +204,9 @@ public class PoetryFetchTask implements OriginRouter {
       saveDailyPoetry((AppDailyPoetry) message.body());
     });
     //当天的推荐诗词到数据库后，使用DALL-E给核心诗句生成配图，并保存到Nginx 相关目录下
-    //TODO：大陆地区不能访问cloudflare AI gateway了，先用默认配图
-//    eventBus.consumer("generate-poetry-image", message -> {
-//      generateImages((String) message.body());
-//    });
+    eventBus.consumer("generate-poetry-image", message -> {
+      generateImages((String) message.body());
+    });
   }
 
   private void initClient(OriginVertxContext originVertxContext, OriginConfig originConfig) {
