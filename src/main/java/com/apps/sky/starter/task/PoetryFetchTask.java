@@ -11,6 +11,7 @@ import com.origin.starter.web.domain.OriginConfig;
 import com.origin.starter.web.domain.OriginVertxContext;
 import com.origin.starter.web.spi.OriginRouter;
 import io.vertx.core.Vertx;
+import io.vertx.core.WorkerExecutor;
 import io.vertx.core.eventbus.EventBus;
 import io.vertx.core.json.JsonObject;
 import io.vertx.ext.web.client.WebClient;
@@ -50,7 +51,7 @@ public class PoetryFetchTask implements OriginRouter {
     //初始化http,redis,sql client
     initClient(originVertxContext, originConfig);
     //注册处理器
-    registerEventBusConsumers();
+    registerEventBusConsumers(originVertxContext);
 
     //启动定时任务
     fetchDailyPoetryTask(originVertxContext);
@@ -197,7 +198,7 @@ public class PoetryFetchTask implements OriginRouter {
     return poetry;
   }
 
-  private void registerEventBusConsumers() {
+  private void registerEventBusConsumers(OriginVertxContext originVertxContext) {
     log.info("开始注册Event Bus Consumers...");
     //从今日诗词API获取到诗句后，保存当天的推荐诗词到数据库
     eventBus.consumer("fetch-daily-poetry-done", message -> {
@@ -205,7 +206,14 @@ public class PoetryFetchTask implements OriginRouter {
     });
     //当天的推荐诗词到数据库后，使用DALL-E给核心诗句生成配图，并保存到Nginx 相关目录下
     eventBus.consumer("generate-poetry-image", message -> {
-      generateImages((String) message.body());
+      WorkerExecutor executor = originVertxContext.getVertx().createSharedWorkerExecutor("http-and-io-operations");
+      TimeInterval timer = DateUtil.timer();
+      executor.executeBlocking(feature -> {
+        generateImages((String) message.body());
+      }, result -> {
+        log.info("executeBlocking generateImages cost {} s", timer.interval()/1000);
+      });
+
     });
   }
 

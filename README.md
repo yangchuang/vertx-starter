@@ -1,4 +1,4 @@
-### 主机环境：腾讯云、Ubuntu 22.04 LTS、openjdk "11.0.20.1"
+### 主机环境：腾讯云Ubuntu 22.04 LTS、openjdk "11.0.20.1"
 
 #### 1. 安装[docker](https://docs.docker.com/engine/install/ubuntu/#install-using-the-repository)
 
@@ -50,3 +50,6 @@ source ~/.bashrc
 
 #### 6. 定时对DALL-E生成的配图进行压缩，见 [图片压缩](./IMAGE_COMPRESS.md)
 
+### 最后感谢🙏
+1. 底层框架使用了[Origin](https://github.com/kxu913/origin) framework, 简化了vertx的开发。
+2. [今日诗词](https://www.jinrishici.com/)提供的API获取每日诗词
