@@ -91,8 +91,15 @@ public class PoetryFetchTask implements OriginRouter {
       .onSuccess(resp -> {
         JsonObject json = resp.bodyAsJsonObject();
         log.error("从今日诗词API获取诗词成功，{},{}", DateUtil.date(), json);
+        AppDailyPoetry poetry = jsonToPoetry(json);
+        //TODO: 通过cloudflare ai gateway访问不了openai API了，先用默认图片
+        //poetry.setImgList(Arrays.asList(IMG_ACCESS_PATH.replace("{date}", DateUtil.today())+ "1.jpg"));
+        poetry.setImgList(Arrays.asList(DEFAULT_IMG_URL));
+
         //发送到event bus，通知对应的consumer处理数据
-        eventBus.send("fetch-daily-poetry-done", json);
+        eventBus.send("fetch-daily-poetry-done", poetry);
+        //并行执行使用DELL-E生成配图。
+        //eventBus.send("generate-poetry-image", poetry.getContent());
       }).onFailure(err ->
         log.error("从今日诗词API获取诗词失败，{},{}", DateUtil.date(), err.getMessage())
       );
@@ -120,15 +127,17 @@ public class PoetryFetchTask implements OriginRouter {
     });
   }
 
-  private void generateImages(JsonObject json) {
+  /**
+   * 使用DELL-E3给核心诗句生成图片
+   * 约定：保存到 /var/www/html/images/poetry/{date}/1.png
+   * 会有个定时任务执行脚本compress_png_to_jpg.sh，把 1.png 压缩成 1.jpg
+   * @param content 核心诗句
+   */
+  private void generateImages(String content) {
     TimeInterval timer = DateUtil.timer();
-
-    AppDailyPoetry poetry = jsonToPoetry(json);
 
     //从环境变量中取OpenAI的API KEY
     String openAIAPIkey = System.getenv("OPENAI_API_KEY");
-    //核心诗句
-    String content = json.getJsonObject("data").getString("content");
     String today = DateUtil.today();
     //JsonObject body = new JsonObject().put("model", "dall-e-2").put("prompt", "中国水墨画: " + content).put("n", 1).put("size", "512x512");
     JsonObject body = new JsonObject().put("model", "dall-e-3").put("prompt", "中国水墨画: " + content).put("n", 1).put("size", "1024x1024");
@@ -137,9 +146,8 @@ public class PoetryFetchTask implements OriginRouter {
       .bearerTokenAuthentication(openAIAPIkey)
       .sendJsonObject(body).onSuccess(resp -> {
         long costTime = timer.interval();
-        log.info("使用OpenAI DELL-E生成配图耗时：{}", costTime);
-
         JsonObject openAIJsonResp = resp.bodyAsJsonObject();
+        log.info("使用OpenAI DELL-E生成配图耗时：{}， resp:{}", costTime, openAIJsonResp);
         //DALL-E3目前只返回一张图片
         String url = openAIJsonResp.getJsonArray("data")
           .getJsonObject(0)
@@ -148,20 +156,13 @@ public class PoetryFetchTask implements OriginRouter {
         //TODO: 文件IO操作也比较慢
         try {
           AppUtil.saveImage(url, destinationPath);
-          //compress_png_to_jpg.sh会将png压缩为jpg
-          poetry.setImgList(Arrays.asList(IMG_ACCESS_PATH.replace("{date}", today)+ "1.jpg"));
+          //TODO：更新当天的img url
         } catch (IOException e) {
           log.warn("保存诗词DALL-E3配图失败，使用默认配图。{}，error：{}", today, e.getMessage());
-          poetry.setImgList(Arrays.asList(DEFAULT_IMG_URL));
         }
       }).onFailure(err -> {
         log.warn("获取诗词DALL-E3配图失败，使用默认配图。{}，error：{}", today, err.getMessage());
-        poetry.setImgList(Arrays.asList(DEFAULT_IMG_URL));
       }).onComplete(ar -> {
-        log.info("{}的诗词是:{}", today, poetry);
-        //发送到event bus，通知对应的consumer保存数据到数据库
-        eventBus.send("generate-poetry-image-done", poetry);
-
         long costTime = timer.interval();
         log.info("使用OpenAI DELL-E生成配图并保存到文件系统总耗时：{}", costTime);
       });
@@ -186,14 +187,15 @@ public class PoetryFetchTask implements OriginRouter {
 
   private void registerEventBusConsumers() {
     log.info("开始注册Event Bus Consumers...");
-    //从今日诗词API获取到诗句后，将使用DALL-E给核心诗句配图，保存到Nginx 相关目录下。
-    eventBus.consumer("fetch-daily-poetry-done", poetry -> {
-      generateImages((JsonObject) poetry.body());
-    });
-    //使用DALL-E给核心诗句生成配图后，将诗词信息及配图url一起保存到数据库
-    eventBus.consumer("generate-poetry-image-done", message -> {
+    //从今日诗词API获取到诗句后，保存当天的推荐诗词到数据库
+    eventBus.consumer("fetch-daily-poetry-done", message -> {
       saveDailyPoetry((AppDailyPoetry) message.body());
     });
+    //当天的推荐诗词到数据库后，使用DALL-E给核心诗句生成配图，并保存到Nginx 相关目录下
+    //TODO：大陆地区不能访问cloudflare AI gateway了，先用默认配图
+//    eventBus.consumer("generate-poetry-image", message -> {
+//      generateImages((String) message.body());
+//    });
   }
 
   private void initClient(OriginVertxContext originVertxContext, OriginConfig originConfig) {
