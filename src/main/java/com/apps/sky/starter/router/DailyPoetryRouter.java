@@ -41,7 +41,26 @@ public class DailyPoetryRouter implements OriginRouter {
     router.get("/api/health").handler(healthCheckHandler(originVertxContext));
     router.get("/api/login").handler(loginHandler());
     router.get("/daily-poetry/:date").handler(dailyPoetryHandler());
+    //清除cache
+    router.get("/api/remove-cache").handler(removeCache());
+  }
 
+
+  private Handler<RoutingContext> removeCache() {
+    return ctx -> {
+      String code = ctx.request().params().get("access_key");
+      String redisKey = ctx.request().params().get("redis_key");
+      if (code != null && code.equals(System.getenv("api_access_key"))) {
+        Redis redis = OriginWebApplication.getBeanFactory().getRedisClient();
+        redis.connect().onSuccess(conn -> {
+          conn.send(Request.cmd(Command.DEL).arg(redisKey))
+            .onSuccess(res -> ctx.response().end(res.toString()))
+            .onFailure(err -> ctx.fail(500, err));
+        });
+      } else {
+        ctx.fail(403);
+      }
+    };
   }
 
   private Handler<RoutingContext> loginHandler() {

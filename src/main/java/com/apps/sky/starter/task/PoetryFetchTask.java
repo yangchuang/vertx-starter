@@ -10,10 +10,13 @@ import com.origin.starter.web.OriginWebApplication;
 import com.origin.starter.web.domain.OriginConfig;
 import com.origin.starter.web.domain.OriginVertxContext;
 import com.origin.starter.web.spi.OriginRouter;
+import io.vertx.core.Handler;
 import io.vertx.core.Vertx;
 import io.vertx.core.WorkerExecutor;
 import io.vertx.core.eventbus.EventBus;
 import io.vertx.core.json.JsonObject;
+import io.vertx.ext.web.Router;
+import io.vertx.ext.web.RoutingContext;
 import io.vertx.ext.web.client.WebClient;
 import io.vertx.sqlclient.SqlClient;
 import io.vertx.sqlclient.Tuple;
@@ -55,6 +58,22 @@ public class PoetryFetchTask implements OriginRouter {
 
     //启动定时任务
     fetchDailyPoetryTask(originVertxContext);
+
+    Router router = originVertxContext.getRouter();
+    //手动重新拉去诗句重新生成配图
+    router.get("/api/re-fetch-poetry").handler(reFetchPoetryHandler());
+  }
+
+  private Handler<RoutingContext> reFetchPoetryHandler() {
+    return ctx -> {
+      String code = ctx.request().params().get("access_key");
+      if (code != null && code.equals(System.getenv("api_access_key"))) {
+        fetchDailyPoetry();
+        ctx.response().end("begin re fetch poerty");
+      } else {
+        ctx.fail(403);
+      }
+    };
   }
 
   /**
@@ -151,7 +170,7 @@ public class PoetryFetchTask implements OriginRouter {
     String openAIAPIkey = System.getenv("OPENAI_API_KEY");
     String today = DateUtil.today();
     //JsonObject body = new JsonObject().put("model", "dall-e-2").put("prompt", "中国水墨画: " + content).put("n", 1).put("size", "512x512");
-    JsonObject body = new JsonObject().put("model", "dall-e-3").put("prompt", "中国水墨画: " + content).put("n", 1).put("size", "1024x1024");
+    JsonObject body = new JsonObject().put("model", "dall-e-3").put("prompt", content + "中国水墨画风格").put("n", 1).put("size", "1024x1024");
     //TODO: 这个请求会比较慢
     httpClient.postAbs(DALL_E_URI).putHeader("Content-Type", "application/json")
       .bearerTokenAuthentication(openAIAPIkey)
