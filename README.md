@@ -1,4 +1,12 @@
-### 主机环境：腾讯云Ubuntu 22.04 LTS、openjdk "11.0.20.1"
+### “诗画共赏”小程序后台代码。
+#### 运行截图
+<img src="./images/screen_shot.jpeg" alt="诗画共赏" width=300px/>
+
+#### 体验小程序⬇️
+<img src="./images/gh_71c17530cffe_1280.jpg" alt="诗画共赏" width=300px/>
+
+
+### 后台部署主机环境：腾讯云Ubuntu 22.04 LTS、openjdk-17-sdk
 
 #### 1. 安装[docker](https://docs.docker.com/engine/install/ubuntu/#install-using-the-repository)
 
@@ -50,6 +58,6 @@ source ~/.bashrc
 
 #### 6. 定时对DALL-E生成的配图进行压缩，见 [图片压缩](./IMAGE_COMPRESS.md)
 
-### 最后感谢🙏
+### 感谢🙏
 1. 底层框架使用了[Origin](https://github.com/kxu913/origin) framework, 简化了vertx的开发。
 2. [今日诗词](https://www.jinrishici.com/)提供的API获取每日诗词
