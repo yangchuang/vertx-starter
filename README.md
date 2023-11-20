@@ -5,6 +5,7 @@
 #### 体验小程序⬇️
 <img src="./images/gh_71c17530cffe_1280.jpg" alt="诗画共赏" width=300px/>
 
+前端代码地址：[poetry_with_dalle_art](https://github.com/yangchuang/poetry_with_dalle_art)
 
 ### 后台部署主机环境：腾讯云Ubuntu 22.04 LTS、openjdk-17-sdk
 
