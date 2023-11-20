@@ -1,4 +1,4 @@
-### “诗画共赏”小程序后台代码。
+### “诗画共赏”小程序后台代码
 “诗画共赏”是一个展示唐诗宋词和DALL-E3 AI配图的小程序。每天，你可以在这里欣赏到一首精选的唐诗宋词，以及根据诗句生成的DALL-E3 AI配图。
 #### 运行截图
 <img src="./images/screen_shot.jpeg" alt="诗画共赏" width=300px/>
@@ -63,3 +63,7 @@ source ~/.bashrc
 ### 感谢🙏
 1. 底层框架使用了[Origin](https://github.com/kxu913/origin) framework, 简化了vertx的开发。
 2. [今日诗词](https://www.jinrishici.com/)提供的API获取每日诗词
+3. 使用[ChatGPT-Next-Web](https://github.com/Yidadaa/ChatGPT-Next-Web) 部署到vercel作为代理使国内的服务器可以访问OpenAI的DALL-E API
+
+### 灵感来源
+- [yihong0618/2023](https://github.com/yihong0618/2023)
