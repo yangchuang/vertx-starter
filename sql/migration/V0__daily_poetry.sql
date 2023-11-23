@@ -28,6 +28,11 @@ COMMENT ON COLUMN app_daily_poetry.ip_address IS '调用今日诗词API的IP地�
 COMMENT ON COLUMN app_daily_poetry.create_time IS '创建时间';
 COMMENT ON COLUMN app_daily_poetry.update_time IS '更新时间';
 
+--
+ALTER TABLE app_daily_poetry
+ADD COLUMN has_audio BOOLEAN DEFAULT false;
+COMMENT ON COLUMN app_daily_poetry.has_audio IS '是否有音频';
+
 CREATE TABLE app_daily_poetry_user (
     id SERIAL PRIMARY KEY,
     open_id TEXT UNIQUE,

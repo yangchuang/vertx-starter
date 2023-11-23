@@ -18,17 +18,22 @@ import io.vertx.core.json.JsonObject;
 import io.vertx.ext.web.Router;
 import io.vertx.ext.web.RoutingContext;
 import io.vertx.ext.web.client.WebClient;
+import io.vertx.sqlclient.Row;
+import io.vertx.sqlclient.RowSet;
 import io.vertx.sqlclient.SqlClient;
 import io.vertx.sqlclient.Tuple;
 import lombok.extern.slf4j.Slf4j;
 
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.Arrays;
 
 @Slf4j
 public class PoetryFetchTask implements OriginRouter {
+
 
   private WebClient httpClient;
 
@@ -38,6 +43,7 @@ public class PoetryFetchTask implements OriginRouter {
 
   private static final String DALL_E_URI = "https://ai.ericsky.com/api/openai/v1/images/generations";
 
+  private static final String TTS_PY = "/work/projects/sky_apps/tts.py";
   /**
    * 获取当天诗词配图失败的fallback地址
    */
@@ -45,6 +51,7 @@ public class PoetryFetchTask implements OriginRouter {
 
   //
   private static final String IMG_STORE_PATH = "/var/www/html/images/poetry/{date}/";
+  private static final String AUDIO_STORE_PATH = "/var/www/html/audios/poetry/{date}/";
   //本地调试保存地址
   //private static final String IMG_STORE_PATH = "/Users/yang/data/{date}/";
   private static final String IMG_ACCESS_PATH = "https://skytools.cn/images/poetry/{date}/";
@@ -58,10 +65,92 @@ public class PoetryFetchTask implements OriginRouter {
 
     //启动定时任务
     fetchDailyPoetryTask(originVertxContext);
+    //定时调用生成poetry的语音文件
+    poetryTTSTask(originVertxContext);
 
     Router router = originVertxContext.getRouter();
     //手动重新拉去诗句重新生成配图
     router.get("/api/re-fetch-poetry").handler(reFetchPoetryHandler());
+    //将某天的诗词文字转语音
+    router.get("/api/tts-poetry").handler(ttsPoetryHandler());
+
+  }
+
+  private Handler<RoutingContext> ttsPoetryHandler() {
+    return ctx -> {
+      String code = ctx.request().params().get("access_key");
+      String date = ctx.request().params().get("date");
+      if (code != null && code.equals(System.getenv("api_access_key"))) {
+        poetryTTS(date);
+        ctx.response().end("poetry tts for date:" + date);
+      } else {
+        ctx.fail(403);
+      }
+    };
+  }
+
+  private void poetryTTSTask(OriginVertxContext originVertxContext) {
+    Vertx vertx = originVertxContext.getVertx();
+    //设置00:20:00 开始取当天数据
+    vertx.setTimer(millisecondsToMidnight() + 20*60*1000, timerId -> {
+      //vertx.setTimer(3000, timerId -> {//本地调试使用
+      log.info("begin poetryTTSTask daily job at {}", LocalDateTimeUtil.now());
+      poetryTTS(DateUtil.today());
+      //每天取一次数据
+      vertx.setPeriodic(24 * 60 * 60 * 1000, periodicId -> {
+        log.info("begin poetryTTSTask at {}", LocalDateTimeUtil.now());
+        poetryTTS(DateUtil.today());
+      });
+    });
+  }
+
+  private void poetryTTS(String date) {
+    log.info("begin getPoetryByDay");
+    String sql = "select '《' || title || '》 ' || dynasty || ', ' || author || '。 ' || array_to_string(origin_content, ' ') from app_daily_poetry where date = $1 order by id asc limit 1";
+    SqlClient sqlClient = OriginWebApplication.getBeanFactory().getSqlClient();
+    sqlClient.preparedQuery(sql).execute(Tuple.of(date))
+      .onComplete(ar -> {
+        if (ar.succeeded()) {
+          RowSet<Row> rows = ar.result();
+          if (rows.size() != 0) {
+            Row row = rows.iterator().next();
+            String poetry = row.getString(0);
+            log.info("{}:{}" , date, poetry);
+            generatePoetryMp3(date, poetry);
+          } else {
+            log.warn("data not found on date:" + date);
+          }
+        } else {
+          log.error(("get daily poetry failed: " + ar.cause().getMessage()));
+        }
+      });
+  }
+
+  private void generatePoetryMp3(String date, String poetry) {
+    try {
+      ProcessBuilder processBuilder = new ProcessBuilder("python3", TTS_PY,
+        poetry, AUDIO_STORE_PATH.replace("{date}", date), "1.mp3");
+      Process process = processBuilder.start();
+      BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
+      String line;
+      while ((line = reader.readLine()) != null) {
+        log.warn(line);
+      }
+      reader.close();
+      //生成音频后，更新has_audio 字段
+      updateHasAudio(date);
+    } catch (IOException e) {
+      e.printStackTrace();
+    }
+  }
+
+  private void updateHasAudio(String date) {
+    String sql = "update app_daily_poetry set has_audio = $1 where date = $2 ";
+    SqlClient sqlClient = OriginWebApplication.getBeanFactory().getSqlClient();
+    sqlClient.preparedQuery(sql).execute(Tuple.of(true, date))
+      .onFailure(err -> {
+        log.error("更新当天的has_audio失败，{}，{}", date, err.getMessage());
+      });
   }
 
   private Handler<RoutingContext> reFetchPoetryHandler() {
