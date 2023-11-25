@@ -39,7 +39,8 @@ public class PoetryFetchTask implements OriginRouter {
 
   private EventBus eventBus;
 
-  private static final String CENTENCE_URI = "https://v2.jinrishici.com/sentence";
+  //TODO：放配置文件中
+  private static final String SENTENCE_URI = "http://localhost:8080/all";
 
   private static final String DALL_E_URI = "https://ai.ericsky.com/api/openai/v1/images/generations";
 
@@ -194,7 +195,7 @@ public class PoetryFetchTask implements OriginRouter {
     //从环境变量中取今日诗词API的token，https://www.jinrishici.com/doc/#get-token
     String jrscToken = System.getenv("JRSC_TOKEN");
 
-    httpClient.getAbs(CENTENCE_URI)
+    httpClient.getAbs(SENTENCE_URI)
       .putHeader("X-User-Token", jrscToken)
       .send()
       .onSuccess(resp -> {
@@ -213,20 +214,17 @@ public class PoetryFetchTask implements OriginRouter {
   }
 
   private void saveDailyPoetry(AppDailyPoetry poetry) {
-    String sql = "INSERT INTO app_daily_poetry (date, content, popularity, title, dynasty, author, origin_content, match_tags, img_list, ip_address) " +
-      "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)";
+    String sql = "INSERT INTO app_daily_poetry (date, content, title, dynasty, author, origin_content, img_list) " +
+      "VALUES ($1, $2, $3, $4, $5, $6, $7)";
     SqlClient sqlClient = OriginWebApplication.getBeanFactory().getSqlClient();
     sqlClient.preparedQuery(sql).execute(Tuple.of(
       poetry.getDate(),
       poetry.getContent(),
-      poetry.getPopularity(),
       poetry.getTitle(),
       poetry.getDynasty(),
       poetry.getAuthor(),
       poetry.getOriginContent().toArray(),
-      poetry.getMatchTags().toArray(),
-      poetry.getImgList().toArray(),
-      poetry.getIpAddress()
+      poetry.getImgList().toArray()
     )).onSuccess(result -> {
       log.info("保存诗词信息到数据库成功，{}", DateUtil.today());
     }).onFailure(throwable -> {
@@ -259,7 +257,7 @@ public class PoetryFetchTask implements OriginRouter {
     String openAIAPIkey = System.getenv("OPENAI_API_KEY");
     String today = DateUtil.today();
     //JsonObject body = new JsonObject().put("model", "dall-e-2").put("prompt", "中国水墨画: " + content).put("n", 1).put("size", "512x512");
-    JsonObject body = new JsonObject().put("model", "dall-e-3").put("prompt", content + "中国水墨画风格").put("n", 1).put("size", "1024x1024");
+    JsonObject body = new JsonObject().put("model", "dall-e-3").put("prompt", content + " 中国水墨画风格").put("n", 1).put("size", "1024x1024");
     //TODO: 这个请求会比较慢
     httpClient.postAbs(DALL_E_URI).putHeader("Content-Type", "application/json")
       .bearerTokenAuthentication(openAIAPIkey)
@@ -287,20 +285,15 @@ public class PoetryFetchTask implements OriginRouter {
       });
   }
 
-  private AppDailyPoetry jsonToPoetry(JsonObject json) {
-    JsonObject data = json.getJsonObject("data");
-    JsonObject origin = data.getJsonObject("origin");
+  private AppDailyPoetry jsonToPoetry(JsonObject data) {
 
     AppDailyPoetry poetry = new AppDailyPoetry();
     poetry.setDate(DateUtil.today());//今天
-    poetry.setContent(data.getString("content"));
-    poetry.setPopularity(data.getInteger("popularity"));
-    poetry.setTitle(origin.getString("title"));
-    poetry.setDynasty(origin.getString("dynasty"));
-    poetry.setAuthor(origin.getString("author"));
-    poetry.setOriginContent(origin.getJsonArray("content").getList());
-    poetry.setMatchTags(data.getJsonArray("matchTags").getList());
-    poetry.setIpAddress(json.getString("ipAddress"));
+    poetry.setContent(data.getString("sentence"));
+    poetry.setTitle(data.getString("title"));
+    poetry.setDynasty(data.getString("dynasty"));
+    poetry.setAuthor(data.getString("author"));
+    poetry.setOriginContent(data.getJsonArray("paragraphs").getList());
     //先用默认图片, DALL-E3生成配图后再更新图片地址
     poetry.setImgList(Arrays.asList(DEFAULT_IMG_URL));
     return poetry;
