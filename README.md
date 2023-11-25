@@ -16,8 +16,9 @@
 ```bash
 docker pull redis:latest
 docker images
-#-p 6379:6379：映射容器服务的 6379 端口到宿主机的 6379 端口。外部可以直接通过宿主机ip:6379 访问到 Redis 的服务。
-docker run -itd --name redis -p 6379:6379 redis
+#-p 6379:6379：映射容器服务的 6379 端口到宿主机的 6379 端口。外部可以直接通过宿主机ip:6379 访问到 Redis 的服务。数据目录挂载到服务器/data/redis 目录下
+# docker run -itd --name redis -p 6379:6379 redis
+docker run -d --name redis-container -v /data/redis:/data --restart=always -p 6379:6379 redis
 docker ps
 #通过 redis-cli 连接测试使用 redis 服务
 docker exec -it redis /bin/bash
@@ -60,9 +61,11 @@ source ~/.bashrc
 
 #### 6. 定时对DALL-E生成的配图进行压缩，见 [图片压缩](./IMAGE_COMPRESS.md)
 
+#### 7. 采集数据，部署一套[古诗词API](https://github.com/xenv/gushici)
+
 ### 感谢🙏
 1. 底层框架使用了[Origin](https://github.com/kxu913/origin) framework, 简化了vertx的开发。
-2. [今日诗词](https://www.jinrishici.com/)提供的API获取每日诗词
+2. 使用[古诗词API](https://github.com/xenv/gushici)，自己部署了一套服务，数据集来源于 [花间集](https://github.com/chinese-poetry/huajianji)的诗词部分
 3. 使用[ChatGPT-Next-Web](https://github.com/Yidadaa/ChatGPT-Next-Web) 部署到vercel作为代理使国内的服务器可以访问OpenAI的DALL-E API
 
 ### 灵感来源
