@@ -5,7 +5,7 @@ import os
 import edge_tts
 
 async def generate_tts(text, store_path, file_name):
-  voice = "zh-CN-XiaoxiaoNeural"
+  voice = "zh-CN-YunjianNeural"
 
   # 检查存储路径是否存在，不存在则创建目录
   if not os.path.exists(store_path):

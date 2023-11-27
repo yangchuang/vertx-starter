@@ -124,6 +124,7 @@ public class PoetryFetchTask implements OriginRouter {
         } else {
           log.error(("get daily poetry failed: " + ar.cause().getMessage()));
         }
+        sqlClient.close();
       });
   }
 
@@ -151,7 +152,7 @@ public class PoetryFetchTask implements OriginRouter {
     sqlClient.preparedQuery(sql).execute(Tuple.of(true, date))
       .onFailure(err -> {
         log.error("更新当天的has_audio失败，{}，{}", date, err.getMessage());
-      });
+      }).onComplete(rs -> sqlClient.close());
   }
 
   private Handler<RoutingContext> reFetchPoetryHandler() {
@@ -229,7 +230,7 @@ public class PoetryFetchTask implements OriginRouter {
       log.info("保存诗词信息到数据库成功，{}", DateUtil.today());
     }).onFailure(throwable -> {
       log.error("保存诗词信息到数据库失败，{}，{}", DateUtil.today(), throwable.getMessage());
-    });
+    }).onComplete(rs -> sqlClient.close());
   }
 
   private void updateImageUrl() {
@@ -241,7 +242,7 @@ public class PoetryFetchTask implements OriginRouter {
     sqlClient.preparedQuery(sql).execute(Tuple.of(new String[] {imgUrl}, today))
       .onFailure(err -> {
         log.error("更新当天配图失败，{}，{}", today, err.getMessage());
-      });
+      }).onComplete(rs -> sqlClient.close());
   }
 
   /**

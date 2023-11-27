@@ -93,12 +93,14 @@ public class DailyPoetryRouter implements OriginRouter {
     String sql = "insert into app_daily_poetry_user(open_id, union_id, session_key) values($1, $2, $3)  " +
       "ON CONFLICT (open_id) DO update set session_key = $4, last_login_time = now(), update_time = now()";
     SqlClient sqlClient = OriginWebApplication.getBeanFactory().getSqlClient();
-    sqlClient.preparedQuery(sql).execute(Tuple.of(openId, unionid, sessionKey, sessionKey))
-      .onSuccess(rs -> {
+    sqlClient.preparedQuery(sql).execute(Tuple.of(openId, unionid, sessionKey, sessionKey)).onComplete(rs -> {
+      if (rs.succeeded()) {
         log.info("保存或更新user成功，{}", jsonObject);
-      }).onFailure(err -> {
-        log.error("保存或更新user失败，{},{}", jsonObject, err.getMessage());
-      });
+      } else  {
+          log.error("保存或更新user失败，{},{}", jsonObject, rs.cause());
+      }
+      sqlClient.close();
+    });
 
   }
 
@@ -152,6 +154,7 @@ public class DailyPoetryRouter implements OriginRouter {
           log.error(("get daily poetry failed: " + ar.cause().getMessage()));
           ctx.fail(500, ar.cause());
         }
+        sqlClient.close();
       }).onFailure(err -> ctx.fail(500, err));
   }
 

@@ -18,11 +18,6 @@ public class AppDailyPoetry {
   private String content;
 
   /**
-   * 诗句的流行度评价
-   */
-  private Integer popularity;
-
-  /**
    * 诗句的标题
    */
   private String title;
@@ -43,19 +38,9 @@ public class AppDailyPoetry {
   private List<String> originContent;
 
   /**
-   * 与诗句相关的标签
-   */
-  private List<String> matchTags;
-
-  /**
    * 核心诗句DALL-E API创建的图片地址列表
    */
   private List<String> imgList;
-
-  /**
-   * 调用今日诗词API的IP地址
-   */
-  private String ipAddress;
 
 }
 
