@@ -56,7 +56,7 @@ public class DailyPoetryRouter implements OriginRouter {
           conn.send(Request.cmd(Command.DEL).arg(redisKey))
             .onSuccess(res -> ctx.response().end(res.toString()))
             .onFailure(err -> ctx.fail(500, err));
-        });
+        }).onComplete(ar -> ar.result().close());
       } else {
         ctx.fail(403);
       }
@@ -122,7 +122,7 @@ public class DailyPoetryRouter implements OriginRouter {
         log.error("Failed to connect to Redis: {}", ex.getMessage());
         //连接redis失败，直接查询数据库
         getDailyPoetryFromDB(ctx, date);
-      });
+      }).onComplete(ar -> ar.result().close());
 
     };
   }
@@ -142,7 +142,7 @@ public class DailyPoetryRouter implements OriginRouter {
             redis.connect().onSuccess(conn -> {
               conn.send(Request.cmd(Command.SET, date, Json.encode(jsonObject), "EX", "86400"));
               //TODO: conn 需不需要关闭？
-            });
+            }).onComplete(arConn -> arConn.result().close());
 
             //response json
             ctx.json(jsonObject);
@@ -173,7 +173,7 @@ public class DailyPoetryRouter implements OriginRouter {
         redisConnection.close();
       }).onFailure(ex -> {
         promise.complete(Status.KO(new JsonObject().put("error", ex.getLocalizedMessage())));
-      });
+      }).onComplete(ar -> ar.result().close());
     });
 
     return healthCheckHandler;
