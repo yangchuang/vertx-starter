@@ -233,13 +233,13 @@ public class PoetryFetchTask implements OriginRouter {
     }).onComplete(rs -> sqlClient.close());
   }
 
-  private void updateImageUrl() {
+  private void updateImageUrl(String revisedPrompt) {
     String today = DateUtil.today();
     String imgUrl = IMG_ACCESS_PATH.replace("{date}", today)+ "1.jpg";
 
-    String sql = "update app_daily_poetry set img_list = $1 where date = $2 ";
+    String sql = "update app_daily_poetry set img_list = $1, revised_prompt = $2 where date = $3 ";
     SqlClient sqlClient = OriginWebApplication.getBeanFactory().getSqlClient();
-    sqlClient.preparedQuery(sql).execute(Tuple.of(new String[] {imgUrl}, today))
+    sqlClient.preparedQuery(sql).execute(Tuple.of(new String[] {imgUrl}, revisedPrompt, today))
       .onFailure(err -> {
         log.error("更新当天配图失败，{}，{}", today, err.getMessage());
       }).onComplete(rs -> sqlClient.close());
@@ -267,14 +267,16 @@ public class PoetryFetchTask implements OriginRouter {
         JsonObject openAIJsonResp = resp.bodyAsJsonObject();
         log.info("使用OpenAI DELL-E生成配图耗时：{}， resp:{}", costTime, openAIJsonResp);
         //DALL-E3目前只返回一张图片
-        String url = openAIJsonResp.getJsonArray("data")
-          .getJsonObject(0)
-          .getString("url");
+        JsonObject jsonObject = openAIJsonResp.getJsonArray("data")
+          .getJsonObject(0);
+        String url = jsonObject.getString("url");
+        String revisedPrompt = jsonObject.getString("revised_prompt");
+
         String destinationPath = IMG_STORE_PATH.replace("{date}", today)+ "1.png";
         //TODO: 文件IO操作也比较慢
         try {
           AppUtil.saveImage(url, destinationPath);
-          updateImageUrl();
+          updateImageUrl(revisedPrompt);
         } catch (IOException e) {
           log.warn("保存诗词DALL-E3配图失败，使用默认配图。{}，error：{}", today, e.getMessage());
         }

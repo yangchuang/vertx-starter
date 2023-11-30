@@ -15,13 +15,10 @@ public class TestAppDailyPoetry {
 
     AppDailyPoetry poetry = new AppDailyPoetry();
     poetry.setContent(data.getString("content"));
-    poetry.setPopularity(data.getInteger("popularity"));
     poetry.setTitle(origin.getString("title"));
     poetry.setDynasty(origin.getString("dynasty"));
     poetry.setAuthor(origin.getString("author"));
     poetry.setOriginContent(origin.getJsonArray("content").getList());
-    poetry.setMatchTags(data.getJsonArray("matchTags").getList());
-    poetry.setIpAddress(json.getString("ipAddress"));
 
     System.out.println(poetry);
   }

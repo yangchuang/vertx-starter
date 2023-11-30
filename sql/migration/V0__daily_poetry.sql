@@ -33,6 +33,10 @@ ALTER TABLE app_daily_poetry
 ADD COLUMN has_audio BOOLEAN DEFAULT false;
 COMMENT ON COLUMN app_daily_poetry.has_audio IS '是否有音频';
 
+ALTER TABLE app_daily_poetry
+ADD COLUMN revised_prompt TEXT DEFAULT null;
+COMMENT ON COLUMN app_daily_poetry.revised_prompt IS 'DALL-E3 prompt';
+
 CREATE TABLE app_daily_poetry_user (
     id SERIAL PRIMARY KEY,
     open_id TEXT UNIQUE,
