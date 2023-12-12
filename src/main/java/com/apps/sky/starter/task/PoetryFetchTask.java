@@ -92,8 +92,8 @@ public class PoetryFetchTask implements OriginRouter {
 
   private void poetryTTSTask(OriginVertxContext originVertxContext) {
     Vertx vertx = originVertxContext.getVertx();
-    //设置00:20:00 开始取当天数据
-    vertx.setTimer(millisecondsToMidnight() + 20*60*1000, timerId -> {
+    //设置00:12:00 生成音频
+    vertx.setTimer(millisecondsToMidnight() + 12*60*1000, timerId -> {
       //vertx.setTimer(3000, timerId -> {//本地调试使用
       log.info("begin poetryTTSTask daily job at {}", LocalDateTimeUtil.now());
       poetryTTS(DateUtil.today());
