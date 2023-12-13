@@ -92,8 +92,8 @@ public class PoetryFetchTask implements OriginRouter {
 
   private void poetryTTSTask(OriginVertxContext originVertxContext) {
     Vertx vertx = originVertxContext.getVertx();
-    //设置00:12:00 生成音频
-    vertx.setTimer(millisecondsToMidnight() + 12*60*1000, timerId -> {
+    //设置00:05:00 生成音频
+    vertx.setTimer(millisecondsToMidnight() + 5*60*1000, timerId -> {
       //vertx.setTimer(3000, timerId -> {//本地调试使用
       log.info("begin poetryTTSTask daily job at {}", LocalDateTimeUtil.now());
       poetryTTS(DateUtil.today());
@@ -107,7 +107,7 @@ public class PoetryFetchTask implements OriginRouter {
 
   private void poetryTTS(String date) {
     log.info("begin getPoetryByDay");
-    String sql = "select '《' || title || '》 ' || dynasty || ', ' || author || '。 ' || array_to_string(origin_content, ' ') from app_daily_poetry where date = $1 order by id asc limit 1";
+    String sql = "select '《' || title || '》 ' || COALESCE(dynasty, '') || ', ' || COALESCE(author, '') || '。 ' || array_to_string(origin_content, ' ') from app_daily_poetry where date = $1 order by id asc limit 1";
     SqlClient sqlClient = OriginWebApplication.getBeanFactory().getSqlClient();
     sqlClient.preparedQuery(sql).execute(Tuple.of(date))
       .onComplete(ar -> {
@@ -201,7 +201,7 @@ public class PoetryFetchTask implements OriginRouter {
       .send()
       .onSuccess(resp -> {
         JsonObject json = resp.bodyAsJsonObject();
-        log.error("从今日诗词API获取诗词成功，{},{}", DateUtil.date(), json);
+        log.info("从今日诗词API获取诗词成功，{},{}", DateUtil.date(), json);
         AppDailyPoetry poetry = jsonToPoetry(json);
 
         //1. 发送到event bus，通知对应的consumer保存数据到数据库
