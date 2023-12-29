@@ -27,6 +27,7 @@ import lombok.extern.slf4j.Slf4j;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.Arrays;
@@ -64,8 +65,11 @@ public class PoetryFetchTask implements OriginRouter {
     //注册处理器
     registerEventBusConsumers(originVertxContext);
 
+    //测试使用，生成未来的诗词
+    fetchFuturePoetryTask(originVertxContext);
+
     //启动定时任务
-    fetchDailyPoetryTask(originVertxContext);
+    //fetchDailyPoetryTask(originVertxContext);
     //定时调用生成poetry的语音文件
     poetryTTSTask(originVertxContext);
 
@@ -75,6 +79,69 @@ public class PoetryFetchTask implements OriginRouter {
     //将某天的诗词文字转语音
     router.get("/api/tts-poetry").handler(ttsPoetryHandler());
 
+  }
+
+  private void fetchFuturePoetryTask(OriginVertxContext originVertxContext) {
+    Vertx vertx = originVertxContext.getVertx();
+    //every 61 seconds
+    vertx.setPeriodic(61 * 1000, periodicId -> {
+      log.info("begin to fetch future poetry at {}", LocalDateTimeUtil.now());
+      fetchFuturePoetry();
+    });
+  }
+
+  private void fetchFuturePoetry() {
+    String sql = "select date from app_daily_poetry adp order by id desc limit 1";
+    SqlClient sqlClient = OriginWebApplication.getBeanFactory().getSqlClient();
+    sqlClient.preparedQuery(sql).execute()
+      .onComplete(ar -> {
+        if (ar.succeeded()) {
+          RowSet<Row> rows = ar.result();
+          if (rows.size() != 0) {
+            Row row = rows.iterator().next();
+            String date = row.getString(0);
+            log.info("最新日期:{}" , date);
+            //生成next day的
+            fetchNextDayPoetry(date);
+          } else {
+            log.warn("没有数据");
+          }
+        } else {
+          log.error(("fetchFuturePoetry failed: " + ar.cause().getMessage()));
+        }
+        sqlClient.close();
+      });
+  }
+
+  private void fetchNextDayPoetry(String date) {
+    String nextDay = getNextDate(date);
+
+    httpClient.getAbs(SENTENCE_URI)
+      .send()
+      .onSuccess(resp -> {
+        JsonObject json = resp.bodyAsJsonObject();
+        log.info("从今日诗词API获取诗词成功，{},{}", nextDay, json);
+        AppDailyPoetry poetry = jsonToPoetry(json);
+        poetry.setDate(nextDay);
+        poetry.setImgList(null);
+        //1. 发送到event bus，通知对应的consumer保存数据到数据库
+        eventBus.send("fetch-daily-poetry-done", poetry);
+
+        //2. 并行执行使用DELL-E生成配图。
+        eventBus.send("generate-poetry-image-1", poetry);
+        eventBus.send("generate-poetry-image-2", poetry);
+        eventBus.send("generate-poetry-image-3", poetry);
+        eventBus.send("generate-poetry-image-4", poetry);
+        eventBus.send("generate-poetry-image-5", poetry);
+      }).onFailure(err ->
+        log.error("从今日诗词API获取诗词失败，{},{}", DateUtil.date(), err.getMessage())
+      );
+  }
+
+  String getNextDate(String dateStr) {
+    LocalDate date = LocalDate.parse(dateStr);
+    LocalDate nextDate = date.plusDays(1);
+    return nextDate.toString();
   }
 
   private Handler<RoutingContext> ttsPoetryHandler() {
@@ -225,11 +292,11 @@ public class PoetryFetchTask implements OriginRouter {
       poetry.getDynasty(),
       poetry.getAuthor(),
       poetry.getOriginContent().toArray(),
-      poetry.getImgList().toArray()
+      poetry.getImgList() == null ? null : poetry.getImgList().toArray()
     )).onSuccess(result -> {
-      log.info("保存诗词信息到数据库成功，{}", DateUtil.today());
+      log.info("保存诗词信息到数据库成功，{}", poetry.getDate());
     }).onFailure(throwable -> {
-      log.error("保存诗词信息到数据库失败，{}，{}", DateUtil.today(), throwable.getMessage());
+      log.error("保存诗词信息到数据库失败，{}，{}", poetry.getDate(), throwable.getMessage());
     }).onComplete(rs -> sqlClient.close());
   }
 
@@ -243,6 +310,76 @@ public class PoetryFetchTask implements OriginRouter {
       .onFailure(err -> {
         log.error("更新当天配图失败，{}，{}", today, err.getMessage());
       }).onComplete(rs -> sqlClient.close());
+  }
+
+
+  private void updateImageUrlN(String revisedPrompt, String imgUrl, String date) {
+    //String imgUrl = IMG_ACCESS_PATH.replace("{date}", date)+ imageNum + ".jpg";
+
+    String sql = "update app_daily_poetry set img_list = array_append(img_list, $1), revised_prompt = $2 where date = $3 ";
+    SqlClient sqlClient = OriginWebApplication.getBeanFactory().getSqlClient();
+    sqlClient.preparedQuery(sql).execute(Tuple.of(imgUrl, revisedPrompt, date))
+      .onFailure(err -> {
+        log.error("更新当天配图失败，{}，{}", date, err.getMessage());
+      }).onComplete(rs -> sqlClient.close());
+  }
+
+
+  /**
+   */
+  private void generateImagesN(AppDailyPoetry poetry, String imageNum) {
+    TimeInterval timer = DateUtil.timer();
+
+    String style;
+
+    switch (imageNum) {
+      case "2":
+        style = "ukiyoe";
+        break;
+      case "5":
+        style = "water color painting";
+        break;
+      case "4":
+        style = "Pablo Picasso";
+        break;
+      case "53":
+        style = "Vincent Willem van Gogh";
+        break;
+      default:
+        style = "traditional chinese painting";
+    }
+
+    String openAIAPIkey = "sk-T***";
+    String date = poetry.getDate();
+    //JsonObject body = new JsonObject().put("model", "dall-e-2").put("prompt", "中国水墨画: " + content).put("n", 1).put("size", "512x512");
+    JsonObject body = new JsonObject().put("model", "dall-e-3").put("prompt",  style + " style："+ poetry.getContent()).put("n", 1).put("size", "1024x1024");
+    //TODO: 这个请求会比较慢
+    httpClient.postAbs(DALL_E_URI).putHeader("Content-Type", "application/json")
+      .bearerTokenAuthentication(openAIAPIkey)
+      .sendJsonObject(body).onSuccess(resp -> {
+        long costTime = timer.interval();
+        JsonObject openAIJsonResp = resp.bodyAsJsonObject();
+        log.info("使用OpenAI DELL-E生成配图耗时：{}， resp:{}", costTime, openAIJsonResp);
+        //DALL-E3目前只返回一张图片
+        JsonObject jsonObject = openAIJsonResp.getJsonArray("data")
+          .getJsonObject(0);
+        String url = jsonObject.getString("url");
+        String revisedPrompt = jsonObject.getString("revised_prompt");
+
+        String destinationPath = IMG_STORE_PATH.replace("{date}", date)+ imageNum + ".png";
+        //TODO: 文件IO操作也比较慢
+        //try {
+          //AppUtil.saveImage(url, destinationPath);
+          updateImageUrlN(revisedPrompt, url, poetry.getDate());
+//        } catch (IOException e) {
+//          log.warn("保存诗词DALL-E3配图失败。{}，error：{}", date, e.getMessage());
+//        }
+      }).onFailure(err -> {
+        log.warn("获取诗词DALL-E3配图失败。{}，error：{}", date, err.getMessage());
+      }).onComplete(ar -> {
+        long costTime = timer.interval();
+        log.info("使用OpenAI DELL-E生成配图并保存到文件系统总耗时：{}", costTime);
+      });
   }
 
   /**
@@ -309,16 +446,72 @@ public class PoetryFetchTask implements OriginRouter {
       saveDailyPoetry((AppDailyPoetry) message.body());
     });
     //当天的推荐诗词到数据库后，使用DALL-E给核心诗句生成配图，并保存到Nginx 相关目录下
-    eventBus.consumer("generate-poetry-image", message -> {
-      WorkerExecutor executor = originVertxContext.getVertx().createSharedWorkerExecutor("http-and-io-operations");
+//    eventBus.consumer("generate-poetry-image", message -> {
+//      WorkerExecutor executor = originVertxContext.getVertx().createSharedWorkerExecutor("http-and-io-operations");
+//      TimeInterval timer = DateUtil.timer();
+//      executor.executeBlocking(feature -> {
+//        generateImages((String) message.body());
+//      }, result -> {
+//        log.info("executeBlocking generateImages cost {} s", timer.interval()/1000);
+//      });
+//
+//    });
+
+    //当天的推荐诗词到数据库后，使用DALL-E给核心诗句生成配图，并保存到Nginx 相关目录下
+    eventBus.consumer("generate-poetry-image-1", message -> {
+      WorkerExecutor executor = originVertxContext.getVertx().createSharedWorkerExecutor("generate-poetry-image-1", 6);
       TimeInterval timer = DateUtil.timer();
       executor.executeBlocking(feature -> {
-        generateImages((String) message.body());
+        generateImagesN((AppDailyPoetry) message.body(), "1");
       }, result -> {
-        log.info("executeBlocking generateImages cost {} s", timer.interval()/1000);
+        log.info("executeBlocking generate-poetry-image-1 cost {} s", timer.interval()/1000);
       });
 
     });
+    //当天的推荐诗词到数据库后，使用DALL-E给核心诗句生成配图，并保存到Nginx 相关目录下
+    eventBus.consumer("generate-poetry-image-2", message -> {
+      WorkerExecutor executor = originVertxContext.getVertx().createSharedWorkerExecutor("generate-poetry-image-2", 6);
+      TimeInterval timer = DateUtil.timer();
+      executor.executeBlocking(feature -> {
+        generateImagesN((AppDailyPoetry) message.body(), "2");
+      }, result -> {
+        log.info("executeBlocking generate-poetry-image-2 cost {} s", timer.interval()/1000);
+      });
+
+    });    //当天的推荐诗词到数据库后，使用DALL-E给核心诗句生成配图，并保存到Nginx 相关目录下
+    eventBus.consumer("generate-poetry-image-3", message -> {
+      WorkerExecutor executor = originVertxContext.getVertx().createSharedWorkerExecutor("generate-poetry-image-3", 6);
+      TimeInterval timer = DateUtil.timer();
+      executor.executeBlocking(feature -> {
+        generateImagesN((AppDailyPoetry) message.body(), "3");
+      }, result -> {
+        log.info("executeBlocking generate-poetry-image-3 cost {} s", timer.interval()/1000);
+      });
+
+    });    //当天的推荐诗词到数据库后，使用DALL-E给核心诗句生成配图，并保存到Nginx 相关目录下
+    eventBus.consumer("generate-poetry-image-4", message -> {
+      WorkerExecutor executor = originVertxContext.getVertx().createSharedWorkerExecutor("generate-poetry-image-4", 6);
+      TimeInterval timer = DateUtil.timer();
+      executor.executeBlocking(feature -> {
+        generateImagesN((AppDailyPoetry) message.body(), "4");
+      }, result -> {
+        log.info("executeBlocking generate-poetry-image-4 cost {} s", timer.interval()/1000);
+      });
+
+    });
+
+    eventBus.consumer("generate-poetry-image-5", message -> {
+      WorkerExecutor executor = originVertxContext.getVertx().createSharedWorkerExecutor("generate-poetry-image-5", 6);
+      TimeInterval timer = DateUtil.timer();
+      executor.executeBlocking(feature -> {
+        generateImagesN((AppDailyPoetry) message.body(), "5");
+      }, result -> {
+        log.info("executeBlocking generate-poetry-image-5 cost {} s", timer.interval()/1000);
+      });
+
+    });
+
+
   }
 
   private void initClient(OriginVertxContext originVertxContext, OriginConfig originConfig) {
