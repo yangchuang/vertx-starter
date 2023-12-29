@@ -65,9 +65,9 @@ public class PoetryFetchTask implements OriginRouter {
     registerEventBusConsumers(originVertxContext);
 
     //启动定时任务
-    fetchDailyPoetryTask(originVertxContext);
+    //fetchDailyPoetryTask(originVertxContext);
     //定时调用生成poetry的语音文件
-    poetryTTSTask(originVertxContext);
+    //poetryTTSTask(originVertxContext);
 
     Router router = originVertxContext.getRouter();
     //手动重新拉去诗句重新生成配图
